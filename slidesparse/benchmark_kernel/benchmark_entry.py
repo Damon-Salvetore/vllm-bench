@@ -76,7 +76,6 @@ PROJECT_ROOT = SLIDESPARSE_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from slidesparse.benchmark_kernel.utils import (
-    # 常量
     DTYPE_CONFIG,
     SUPPORTED_DTYPES,
     DEFAULT_SPARSITY_LIST,
@@ -84,24 +83,19 @@ from slidesparse.benchmark_kernel.utils import (
     DEFAULT_M_LIST,
     M_QUICK_LIST,
     SQUARE_M_LIST,
-    # 硬件检测
     hw_info,
     check_dtype_support,
     get_supported_dtypes_for_gpu,
     check_cusparselt_support,
-    # Sparsity 计算
     calculate_k_slide,
     get_k_expansion_factor,
     pad_to_alignment,
     get_sparsity_list_for_benchmark,
-    # NK 列表
     get_nk_list_for_benchmark,
-    # 文件命名与目录
     build_hw_folder_name,
     build_dtype_folder_name,
     build_output_dir,
     build_result_filename,
-    # 结果整合
     compute_speedup,
     merge_benchmark_results,
 )
