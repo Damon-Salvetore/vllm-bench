@@ -3,35 +3,35 @@
 """
 SlideSparse Model Download Script
 
-用于批量下载 vLLM 基线测试所需的 W8A8 量化模型。
-支持 INT8 (quantized.w8a8) 和 FP8 (FP8-dynamic) 两种格式。
+Batch download W8A8 quantized models for vLLM baseline testing.
+Supports INT8 (quantized.w8a8) and FP8 (FP8-dynamic) formats.
 
 Usage:
-    python3 model_download.py [选项]
+    python3 model_download.py [options]
 
 Options:
-    -a, --all           下载所有模型
-    -i, --int8          仅下载 INT8 模型
-    -f, --fp8           仅下载 FP8 模型
-    -q, --qwen          仅下载 Qwen2.5 系列
-    -l, --llama         仅下载 Llama3.2 系列
-    -m, --model NAME    下载指定模型 (如: qwen2.5-7b-int8)
-    -c, --check         检查已下载模型状态
-    -s, --size          显示模型预估大小
-    -h, --help          显示帮助信息
+    -a, --all           Download all models
+    -i, --int8          Download INT8 models only
+    -f, --fp8           Download FP8 models only
+    -q, --qwen          Download Qwen2.5 series only
+    -l, --llama         Download Llama3.2 series only
+    -m, --model NAME    Download specific model (e.g., qwen2.5-7b-int8)
+    -c, --check         Check downloaded model status
+    -s, --size          Show estimated model sizes
+    -h, --help          Show help message
 
 Examples:
-    python3 model_download.py --all                    # 下载全部模型
-    python3 model_download.py --int8 --qwen            # 下载 Qwen INT8 模型
-    python3 model_download.py --model qwen2.5-7b-fp8   # 下载指定模型
-    python3 model_download.py --check                  # 检查下载状态
+    python3 model_download.py --all                    # Download all models
+    python3 model_download.py --int8 --qwen            # Download Qwen INT8 models
+    python3 model_download.py --model qwen2.5-7b-fp8   # Download specific model
+    python3 model_download.py --check                  # Check download status
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-# 确保可以导入 slidesparse
+# Ensure slidesparse can be imported
 _SCRIPT_DIR = Path(__file__).parent
 _SLIDESPARSE_ROOT = _SCRIPT_DIR.parent
 _PROJECT_ROOT = _SLIDESPARSE_ROOT.parent
@@ -58,15 +58,15 @@ from slidesparse.tools.utils import (
 
 
 def show_model_sizes():
-    """显示模型预估大小"""
-    print_header("模型预估大小")
+    """Show estimated model sizes"""
+    print_header("Estimated Model Sizes")
     
-    print("模型大小参考:")
+    print("Model size reference:")
     for size, gb in sorted(MODEL_SIZE_GB.items(), key=lambda x: x[1]):
-        print(f"  - {size} 模型: ~{gb:.1f} GB")
+        print(f"  - {size} model: ~{gb:.1f} GB")
     
     print()
-    print("估算总大小 (所有模型):")
+    print("Estimated total size (all models):")
     
     int8_total = sum(
         MODEL_SIZE_GB.get(e.size.upper(), 0)
@@ -77,9 +77,9 @@ def show_model_sizes():
         for e in model_registry.list(quant="fp8")
     )
     
-    print(f"  - INT8 全部: ~{int8_total:.1f} GB")
-    print(f"  - FP8 全部:  ~{fp8_total:.1f} GB")
-    print(f"  - 总计:      ~{int8_total + fp8_total:.1f} GB")
+    print(f"  - INT8 total: ~{int8_total:.1f} GB")
+    print(f"  - FP8 total:  ~{fp8_total:.1f} GB")
+    print(f"  - Total:      ~{int8_total + fp8_total:.1f} GB")
 
 
 def download_models(
@@ -88,59 +88,59 @@ def download_models(
     specific_model: str | None = None,
 ):
     """
-    下载模型
+    Download models
     
     Args:
-        quant_filter: 量化类型过滤 (int8, fp8)
-        family_filter: 模型系列过滤 (qwen, llama)
-        specific_model: 指定模型 key
+        quant_filter: Quantization type filter (int8, fp8)
+        family_filter: Model family filter (qwen, llama)
+        specific_model: Specific model key
     """
-    # 检查 HF CLI
+    # Check HF CLI
     if not check_hf_cli():
-        print_error("HuggingFace CLI 未安装")
-        print_info("请运行: pip install -U huggingface_hub")
+        print_error("HuggingFace CLI not installed")
+        print_info("Please run: pip install -U huggingface_hub")
         sys.exit(1)
     
-    # 确保 checkpoints 目录存在
+    # Ensure checkpoints directory exists
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     
-    # 确定要下载的模型
+    # Determine models to download
     if specific_model:
-        # 下载指定模型
+        # Download specific model
         entry = model_registry.get(specific_model)
         if entry is None:
-            print_error(f"模型不存在: {specific_model}")
-            print_info(f"可用模型: {', '.join(list_models())}")
+            print_error(f"Model not found: {specific_model}")
+            print_info(f"Available models: {', '.join(list_models())}")
             sys.exit(1)
         
         models_to_download = [entry]
     else:
-        # 按过滤条件获取模型列表
+        # Get model list by filter conditions
         models_to_download = model_registry.list(
             family=family_filter,
             quant=quant_filter,
         )
     
     if not models_to_download:
-        print_warning("没有符合条件的模型")
+        print_warning("No matching models found")
         return
     
-    # 显示下载计划
+    # Show download plan
     total_gb = sum(e.estimated_gb for e in models_to_download)
-    print_header(f"准备下载 {len(models_to_download)} 个模型 (~{total_gb:.1f} GB)")
+    print_header(f"Preparing to download {len(models_to_download)} models (~{total_gb:.1f} GB)")
     
     for entry in models_to_download:
         print(f"  - {entry.local_name} ({entry.estimated_gb:.1f} GB)")
     print()
     
-    # 开始下载
+    # Start download
     success_count = 0
     failed_models = []
     
     for entry in models_to_download:
-        print_header(f"下载: {entry.local_name}")
+        print_header(f"Downloading: {entry.local_name}")
         print_info(f"HuggingFace: {entry.hf_path}")
-        print_info(f"本地目录: {CHECKPOINT_DIR / entry.local_name}")
+        print_info(f"Local dir: {CHECKPOINT_DIR / entry.local_name}")
         print()
         
         success, msg = download_model(entry.key, CHECKPOINT_DIR)
@@ -154,14 +154,14 @@ def download_models(
         
         print()
     
-    # 显示结果
-    print_header("下载完成")
-    print(f"成功: {success_count}/{len(models_to_download)}")
+    # Show results
+    print_header("Download completed")
+    print(f"Success: {success_count}/{len(models_to_download)}")
     
     if failed_models:
-        print_warning(f"失败: {', '.join(failed_models)}")
+        print_warning(f"Failed: {', '.join(failed_models)}")
     
-    # 显示最终状态
+    # Show final status
     print_model_status(CHECKPOINT_DIR)
 
 
@@ -170,86 +170,86 @@ def main():
         description="SlideSparse Model Download Script",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-可用模型:
+Available models:
 
-  INT8 模型 (quantized.w8a8):
+  INT8 models (quantized.w8a8):
 """ + "\n".join(f"    - {key}" for key in list_models(quant="int8")) + """
 
-  FP8 模型 (FP8-dynamic):
+  FP8 models (FP8-dynamic):
 """ + "\n".join(f"    - {key}" for key in list_models(quant="fp8")) + """
 
-  BitNet 模型 (BF16):
+  BitNet models (BF16):
     - bitnet1.58-2b-bf16
 
-示例:
-  %(prog)s --all                    # 下载全部模型 (INT8 + FP8)
-  %(prog)s --int8 --qwen            # 下载 Qwen INT8 模型
-  %(prog)s --bitnet                 # 下载 BitNet BF16 模型
-  %(prog)s --model qwen2.5-7b-fp8   # 下载指定模型
-  %(prog)s --check                  # 检查下载状态
+Examples:
+  %(prog)s --all                    # Download all models (INT8 + FP8)
+  %(prog)s --int8 --qwen            # Download Qwen INT8 models
+  %(prog)s --bitnet                 # Download BitNet BF16 model
+  %(prog)s --model qwen2.5-7b-fp8   # Download specific model
+  %(prog)s --check                  # Check download status
 """
     )
     
-    # 模型选择
-    model_group = parser.add_argument_group("模型选择")
+    # Model selection
+    model_group = parser.add_argument_group("Model Selection")
     model_group.add_argument(
         "-a", "--all", action="store_true",
-        help="下载所有模型 (INT8 + FP8)"
+        help="Download all models (INT8 + FP8)"
     )
     model_group.add_argument(
         "-i", "--int8", action="store_true",
-        help="仅下载 INT8 模型"
+        help="Download INT8 models only"
     )
     model_group.add_argument(
         "-f", "--fp8", action="store_true",
-        help="仅下载 FP8 模型"
+        help="Download FP8 models only"
     )
     model_group.add_argument(
         "-q", "--qwen", action="store_true",
-        help="仅下载 Qwen2.5 系列"
+        help="Download Qwen2.5 series only"
     )
     model_group.add_argument(
         "-l", "--llama", action="store_true",
-        help="仅下载 Llama3.2 系列"
+        help="Download Llama3.2 series only"
     )
     model_group.add_argument(
         "-b", "--bitnet", action="store_true",
-        help="下载 BitNet BF16 模型 (microsoft)"
+        help="Download BitNet BF16 model (microsoft)"
     )
     model_group.add_argument(
         "-m", "--model", type=str, metavar="NAME",
-        help="下载指定模型"
+        help="Download specific model"
     )
     
-    # 其他选项
-    other_group = parser.add_argument_group("其他选项")
+    # Other options
+    other_group = parser.add_argument_group("Other Options")
     other_group.add_argument(
         "-c", "--check", action="store_true",
-        help="检查已下载模型状态"
+        help="Check downloaded model status"
     )
     other_group.add_argument(
         "-s", "--size", action="store_true",
-        help="显示模型预估大小"
+        help="Show estimated model sizes"
     )
     
     args = parser.parse_args()
     
-    # 显示大小信息
+    # Show size info
     if args.size:
         show_model_sizes()
         return 0
     
-    # 检查模式
+    # Check mode
     if args.check:
         print_model_status(CHECKPOINT_DIR)
         return 0
     
-    # 处理 BitNet 特殊情况
+    # Handle BitNet special case
     if args.bitnet:
         download_models(specific_model="bitnet1.58-2b-bf16")
         return 0
     
-    # 确定过滤条件
+    # Determine filter conditions
     quant_filter = None
     family_filter = None
     
@@ -258,9 +258,9 @@ def main():
     elif args.fp8 and not args.int8:
         quant_filter = "fp8"
     elif args.all:
-        quant_filter = None  # 下载所有
+        quant_filter = None  # Download all
     elif not args.model:
-        # 没有指定任何选项，显示帮助
+        # No options specified, show help
         parser.print_help()
         return 0
     
@@ -269,7 +269,7 @@ def main():
     elif args.llama and not args.qwen:
         family_filter = "llama"
     
-    # 执行下载
+    # Execute download
     download_models(
         quant_filter=quant_filter,
         family_filter=family_filter,

@@ -1334,6 +1334,7 @@ Several edge cases result in incomplete benchmark data:
 | OOM                     | 7B/14B models on RTX 4090/5080 | Insufficient VRAM (24GB/16GB) for large models        |
 | FP4 Illegal Address     | Specific M,N,K with FP4        | cuBLASLt/cuSPARSELt API limitations                   |
 | FP4 Illegal Instruction | Certain dimensions             | API implementation bugs                               |
+| FP16 Illegal Instruction| SQUARE cuSPARSELt  on H100     | API implementation bugs                               |
 
 ### 14.2 Hardware Requirements
 

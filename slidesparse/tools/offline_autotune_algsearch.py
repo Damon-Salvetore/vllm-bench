@@ -1,72 +1,72 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-SlideSparse 统一离线调优与算法搜索脚本
+SlideSparse Unified Offline Tuning and Algorithm Search Script
 
-- CUDA cuBLAS: cuBLASLt GEMM 算法搜索
-- CUDA cuSPARSE: cuSPARSELt 2:4 稀疏算法搜索
-- Triton Dequant: 反量化 + Bias 融合 Kernel
-- Triton Quant Slide: 量化 + Slide 融合 Kernel
-- Triton Quant Only: 纯量化 Kernel
+- CUDA cuBLAS: cuBLASLt GEMM algorithm search
+- CUDA cuSPARSE: cuSPARSELt 2:4 sparse algorithm search
+- Triton Dequant: Dequantization + Bias fusion kernel
+- Triton Quant Slide: Quantization + Slide fusion kernel
+- Triton Quant Only: Pure quantization kernel
 
 
-模型名称约定
+Model naming convention
 ============
-本脚本与其他 tools 脚本的模型名称约定不同：
+This script has different model naming convention from other tools scripts:
 
-1. 输入格式：接受 **base name**（无量化后缀）
-   - 推荐：Qwen2.5-0.5B, Llama3.2-1B
-   - 也可以带后缀（会被自动去除）：Qwen2.5-0.5B-INT8 → Qwen2.5-0.5B
+1. Input format: Accepts **base name** (without quant suffix)
+   - Recommended: Qwen2.5-0.5B, Llama3.2-1B
+   - Can also have suffix (will be auto-removed): Qwen2.5-0.5B-INT8 -> Qwen2.5-0.5B
 
-2. 调优类型：由 --dtype 参数决定（int8/fp8/all），与输入的模型名后缀无关
-   - 这是因为 INT8 和 FP8 模型的 NK 配置相同，只是量化方式不同
+2. Tuning type: Determined by --dtype parameter (int8/fp8/all), unrelated to model suffix
+   - This is because INT8 and FP8 models have same NK config, only quant method differs
 
-3. 传递给子脚本：
-   - CUDA kernel: 完整 checkpoint 名（如 Qwen2.5-0.5B-INT8）
-   - Triton kernel: 任意存在的 checkpoint 名
+3. Passed to sub-scripts:
+   - CUDA kernel: Full checkpoint name (e.g., Qwen2.5-0.5B-INT8)
+   - Triton kernel: Any existing checkpoint name
 
-与其他脚本的区别：
-- model_download.py / throughput_benchmark.py：使用 registry key（如 qwen2.5-0.5b-fp8）
-- weight_convert_entry.py：使用完整目录名或 registry key
-- offline_autotune_algsearch.py（本脚本）：使用 base name，自动按 --dtype 扩展
+Difference from other scripts:
+- model_download.py / throughput_benchmark.py: Use registry key (e.g., qwen2.5-0.5b-fp8)
+- weight_convert_entry.py: Use full directory name or registry key
+- offline_autotune_algsearch.py (this script): Use base name, auto-expand by --dtype
 
 
-参数说明:
+Parameter description:
 =========
---model:       模型名称，支持 base name 或带后缀的完整名称
-               如 "Qwen2.5-0.5B" 或 "Qwen2.5-0.5B-INT8"
-               注意：INT8/FP8 模型的 NK 配置相同，后缀会被忽略
---dtype:       输入数据类型，int8/fp8/all（必须指定）
-               指定要调优的量化类型，与模型后缀无关
---outdtype:    输出数据类型，bf16（默认）可选 --inner-32 高精度累加
---Lmax:        最大稀疏长度
---M-quick:     快速 M 模式 [16, 128, 1024, 4096, 16384]
---m_list:      自定义 M 列表
---warmup:      预热次数（默认 25）
---repeat:      重复次数（默认 100）
---kernels:     指定要调优的 Kernel，格式为 "1,1,0,1,1"
-               顺序: cuBLAS, cuSPARSE, Triton Dequant, Triton Quant Slide, Triton Quant Only
---skip-build:  跳过编译步骤
+--model:       Model name, supports base name or full name with suffix
+               e.g., "Qwen2.5-0.5B" or "Qwen2.5-0.5B-INT8"
+               Note: INT8/FP8 models have same NK config, suffix will be ignored
+--dtype:       Input data type, int8/fp8/all (required)
+               Specifies quant types to tune, unrelated to model suffix
+--outdtype:    Output data type, bf16 (default) optionally --inner-32 for high-precision accumulation
+--Lmax:        Maximum sparsity length
+--M-quick:     Quick M mode [16, 128, 1024, 4096, 16384]
+--m_list:      Custom M list
+--warmup:      Warmup iterations (default 25)
+--repeat:      Repeat iterations (default 100)
+--kernels:     Kernels to tune, format "1,1,0,1,1"
+               Order: cuBLAS, cuSPARSE, Triton Dequant, Triton Quant Slide, Triton Quant Only
+--skip-build:  Skip build step
 
 
-用法示例:
+Usage examples:
 =========
-# 调优所有 Kernel（INT8 + FP8），模型名支持 base name
+# Tune all kernels (INT8 + FP8), model name supports base name
 python3 offline_autotune_algsearch.py --model Qwen2.5-0.5B --dtype all --M-quick
 
-# 也可以带后缀（后缀会被忽略，实际按 --dtype 指定的类型调优）
+# Can also have suffix (will be ignored, actually tunes by --dtype)
 python3 offline_autotune_algsearch.py --model Qwen2.5-0.5B-INT8 --dtype all --M-quick
 
-# 只调优 INT8
+# Tune INT8 only
 python3 offline_autotune_algsearch.py --model Llama3.2-1B --dtype int8 --M-quick
 
-# 只调优 CUDA Kernel（cuBLAS + cuSPARSE），使用高精度累加
+# Tune CUDA kernels only (cuBLAS + cuSPARSE), with high-precision accumulation
 python3 offline_autotune_algsearch.py --model Qwen2.5-0.5B --dtype int8 --inner-32 --kernels 1,1,0,0,0
 
-# 只调优 Triton Kernel
+# Tune Triton kernels only
 python3 offline_autotune_algsearch.py --model Llama3.2-1B --dtype fp8 --kernels 0,0,1,1,1
 
-# 多模型调优
+# Multi-model tuning
 python3 offline_autotune_algsearch.py --model Qwen2.5-0.5B,Llama3.2-1B --dtype all --M-quick
 """
 
@@ -109,10 +109,10 @@ from slidesparse.tools.utils import (
 
 
 # =============================================================================
-# 常量定义
+# Constants
 # =============================================================================
 
-# Kernel 名称列表（顺序固定）
+# Kernel name list (fixed order)
 KERNEL_NAMES = [
     "cuBLASLt GEMM",
     "cuSPARSELt GEMM",
@@ -121,7 +121,6 @@ KERNEL_NAMES = [
     "Triton Quant Only",
 ]
 
-# Kernel 脚本路径
 KERNEL_SCRIPTS = {
     "cublaslt": _SLIDESPARSE_ROOT / "search" / "cuBLASLt_AlgSearch" / "alg_search.py",
     "cusparselt": _SLIDESPARSE_ROOT / "search" / "cuSPARSELt_AlgSearch" / "alg_search.py",
@@ -130,48 +129,47 @@ KERNEL_SCRIPTS = {
     "triton_quant_only": _SLIDESPARSE_ROOT / "csrc" / "quant_only_triton" / "autotune_autogen_quant_only.py",
 }
 
-# Build 脚本路径
 BUILD_SCRIPTS = {
     "cublaslt": _SLIDESPARSE_ROOT / "csrc" / "cublaslt_gemm" / "build_cublaslt.py",
     "cusparselt": _SLIDESPARSE_ROOT / "csrc" / "cusparselt_gemm" / "build_cusparselt.py",
     "compress": _SLIDESPARSE_ROOT / "weight_convert" / "build_compress.py",
 }
 
-# 默认模型列表（使用 base name）
+# Default model list (using base name)
 DEFAULT_MODELS = ["Qwen2.5-0.5B", "Llama3.2-1B"]
 
-# 默认 warmup/repeat
+# Default warmup/repeat
 DEFAULT_WARMUP = 25
 DEFAULT_REPEAT = 100
 
 
 # =============================================================================
-# 工具函数
+# Utility Functions
 # =============================================================================
 
 def parse_kernel_mask(mask_str: str) -> List[bool]:
     """
-    解析 Kernel mask 字符串
+    Parse kernel mask string
     
     Args:
-        mask_str: 格式为 "1,1,0,1,1" 的字符串
+        mask_str: String in format "1,1,0,1,1"
         
     Returns:
-        布尔列表，表示哪些 Kernel 需要调优
+        Boolean list indicating which kernels to tune
     """
     parts = mask_str.split(",")
     if len(parts) != 5:
-        raise ValueError(f"Kernel mask 必须有 5 个值，当前: {mask_str}")
+        raise ValueError(f"Kernel mask must have 5 values, got: {mask_str}")
     return [int(p.strip()) == 1 for p in parts]
 
 
 def get_dtype_for_cuda(dtype: str, inner_32: bool) -> Tuple[str, str]:
     """
-    获取 CUDA Kernel 的 dtype 和 outdtype
+    Get dtype and outdtype for CUDA kernel
     
     Args:
-        dtype: 输入类型 (int8/fp8)
-        inner_32: 是否使用高精度累加
+        dtype: Input type (int8/fp8)
+        inner_32: Use high-precision accumulation
         
     Returns:
         (dtype, outdtype)
@@ -183,7 +181,7 @@ def get_dtype_for_cuda(dtype: str, inner_32: bool) -> Tuple[str, str]:
             return "fp8e4m3", "fp32"
     else:
         if dtype == "int8":
-            # cuBLASLt INT8 默认 int32，cuSPARSELt INT8 默认 bf16
+            # cuBLASLt INT8 default int32, cuSPARSELt INT8 default bf16
             return "int8", "bf16"
         else:  # fp8
             return "fp8e4m3", "bf16"
@@ -191,10 +189,10 @@ def get_dtype_for_cuda(dtype: str, inner_32: bool) -> Tuple[str, str]:
 
 def detect_oom_error(output: str) -> Tuple[bool, Optional[str]]:
     """
-    检测输出中是否包含 CUDA OOM 错误
+    Detect if output contains CUDA OOM error
     
     Returns:
-        (is_oom, suggestion): 是否为 OOM 错误，以及建议
+        (is_oom, suggestion): Whether OOM error, and suggestion
     """
     oom_patterns = [
         "CUDA out of memory",
@@ -205,20 +203,19 @@ def detect_oom_error(output: str) -> Tuple[bool, Optional[str]]:
     
     for pattern in oom_patterns:
         if pattern in output:
-            # 尝试提取更多信息
             suggestion = None
             if "Tried to allocate" in output:
-                # 提取尝试分配的大小
+                # Extract allocation size
                 match = re.search(r"Tried to allocate ([\d.]+) ([GM]iB)", output)
                 if match:
                     size = match.group(1)
                     unit = match.group(2)
                     suggestion = (
-                        f"尝试分配 {size} {unit} 显存失败。\n"
-                        f"建议:\n"
-                        f"  1. 减小 M 列表: --m_list 64,128,256,512,1024,2048,4096,8192,16384\n"
-                        f"  2. 设置环境变量: export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True\n"
-                        f"  3. 重启进程清理显存碎片"
+                        f"Failed to allocate {size} {unit} VRAM.\n"
+                        f"Suggestions:\n"
+                        f"  1. Reduce M list: --m_list 64,128,256,512,1024,2048,4096,8192,16384\n"
+                        f"  2. Set env var: export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True\n"
+                        f"  3. Restart process to clear VRAM fragmentation"
                     )
             return True, suggestion
     return False, None
@@ -226,17 +223,17 @@ def detect_oom_error(output: str) -> Tuple[bool, Optional[str]]:
 
 def run_subprocess(cmd: List[str], name: str) -> Tuple[bool, str]:
     """
-    运行子进程并捕获输出
+    Run subprocess and capture output
     
     Args:
-        cmd: 命令列表
-        name: 进程名称（用于日志）
+        cmd: Command list
+        name: Process name (for logging)
         
     Returns:
         (success, output)
     """
     try:
-        print_info(f"执行: {' '.join(cmd)}")
+        print_info(f"Executing: {' '.join(cmd)}")
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -244,10 +241,10 @@ def run_subprocess(cmd: List[str], name: str) -> Tuple[bool, str]:
         )
         output = result.stdout + result.stderr
         if result.returncode != 0:
-            # 检测 OOM 错误并提供建议
+            # Detect OOM error and provide suggestion
             is_oom, suggestion = detect_oom_error(output)
             if is_oom:
-                oom_msg = f"\n{'='*60}\n[OOM 检测] 显存不足错误\n{'='*60}\n"
+                oom_msg = f"\n{'='*60}\n[OOM Detected] Out of memory error\n{'='*60}\n"
                 if suggestion:
                     oom_msg += suggestion + "\n"
                 oom_msg += "="*60 + "\n"
@@ -255,33 +252,33 @@ def run_subprocess(cmd: List[str], name: str) -> Tuple[bool, str]:
             return False, output
         return True, output
     except Exception as e:
-        return False, f"[{name}] 异常: {str(e)}\n{traceback.format_exc()}"
+        return False, f"[{name}] Exception: {str(e)}\n{traceback.format_exc()}"
 
 
 # =============================================================================
-# Build 步骤
+# Build Step
 # =============================================================================
 
 def run_build_step(force: bool = True) -> bool:
     """
-    运行编译步骤
+    Run build step
     
     Args:
-        force: 是否强制重新编译
+        force: Force rebuild
         
     Returns:
-        是否成功
+        Success or not
     """
-    print_header("Step 0: 编译 CUDA 扩展")
+    print_header("Step 0: Building CUDA Extensions")
     
     success_count = 0
     total_count = len(BUILD_SCRIPTS)
     
     for name, script_path in BUILD_SCRIPTS.items():
-        print_subheader(f"编译 {name}")
+        print_subheader(f"Building {name}")
         
         if not script_path.exists():
-            print_error(f"脚本不存在: {script_path}")
+            print_error(f"Script not found: {script_path}")
             continue
         
         cmd = [sys.executable, str(script_path), "build"]
@@ -290,17 +287,17 @@ def run_build_step(force: bool = True) -> bool:
         
         success, output = run_subprocess(cmd, name)
         if success:
-            print_success(f"{name} 编译成功")
+            print_success(f"{name} build succeeded")
             success_count += 1
         else:
-            print_error(f"{name} 编译失败:")
+            print_error(f"{name} build failed:")
             print(output)
     
     return success_count == total_count
 
 
 # =============================================================================
-# CUDA Kernel 调优
+# CUDA Kernel Tuning
 # =============================================================================
 
 def run_cuda_tune(
@@ -315,7 +312,7 @@ def run_cuda_tune(
     repeat: int,
 ) -> Tuple[bool, str]:
     """
-    运行 CUDA Kernel 调优
+    Run CUDA kernel tuning
     
     Returns:
         (success, message)
@@ -323,7 +320,7 @@ def run_cuda_tune(
     script_path = KERNEL_SCRIPTS[kernel_type]
     
     if not script_path.exists():
-        return False, f"脚本不存在: {script_path}"
+        return False, f"Script not found: {script_path}"
     
     cmd = [
         sys.executable, str(script_path),
@@ -332,7 +329,7 @@ def run_cuda_tune(
         "--model", model,
         "--warmup", str(warmup),
         "--repeat", str(repeat),
-        "--compile",  # 确保编译
+        "--compile",  # Ensure compiled
     ]
     
     if Lmax:
@@ -347,7 +344,7 @@ def run_cuda_tune(
 
 
 # =============================================================================
-# Triton Kernel 调优
+# Triton Kernel Tuning
 # =============================================================================
 
 def run_triton_tune(
@@ -360,7 +357,7 @@ def run_triton_tune(
     repeat: int,
 ) -> Tuple[bool, str]:
     """
-    运行 Triton Kernel 调优
+    Run Triton kernel tuning
     
     Returns:
         (success, message)
@@ -368,7 +365,7 @@ def run_triton_tune(
     script_path = KERNEL_SCRIPTS[kernel_type]
     
     if not script_path.exists():
-        return False, f"脚本不存在: {script_path}"
+        return False, f"Script not found: {script_path}"
     
     cmd = [
         sys.executable, str(script_path),
@@ -389,7 +386,7 @@ def run_triton_tune(
 
 
 # =============================================================================
-# 主调优流程
+# Main Tuning Flow
 # =============================================================================
 
 def run_autotune(
@@ -406,82 +403,82 @@ def run_autotune(
     skip_build: bool,
 ) -> dict:
     """
-    运行完整的调优流程
+    Run full tuning flow
     
     Args:
-        models: 模型 base name 列表（不带量化后缀）
+        models: Model base name list (without quant suffix)
     
     Returns:
-        结果字典 {kernel_name: {model: (success, message)}}
+        Result dict {kernel_name: {model: (success, message)}}
     """
     results = {}
     
-    # Step 0: 编译（如果没有跳过）
+    # Step 0: Build (if not skipped)
     if not skip_build:
         if not run_build_step(force=True):
-            print_warning("部分编译失败，继续调优...")
+            print_warning("Some builds failed, continuing tuning...")
     else:
-        print_info("跳过编译步骤")
+        print_info("Skipping build step")
     
-    # Step 1-5: 按 Kernel 顺序调优
+    # Step 1-5: Tune by kernel order
     kernel_keys = ["cublaslt", "cusparselt", "triton_dequant", "triton_quant_slide", "triton_quant_only"]
     
     for idx, (kernel_key, kernel_name, enabled) in enumerate(zip(kernel_keys, KERNEL_NAMES, kernel_mask)):
         step_num = idx + 1
         
         if not enabled:
-            print_header(f"Step {step_num}: {kernel_name} [跳过]")
+            print_header(f"Step {step_num}: {kernel_name} [Skipped]")
             continue
         
         print_header(f"Step {step_num}: {kernel_name}")
         results[kernel_key] = {}
         
         for base_name in models:
-            print_subheader(f"模型: {base_name}")
+            print_subheader(f"Model: {base_name}")
             
-            # 找到任意一个存在的 checkpoint 来获取 NK 配置
-            # （INT8 和 FP8 的 NK 相同，只需找到一个即可）
+            # Find any existing checkpoint to get NK config
+            # (INT8 and FP8 have same NK, only need to find one)
             ckpt_path, ckpt_name = find_any_model_checkpoint(base_name)
             if ckpt_path is None:
-                print_error(f"未找到模型 '{base_name}' 的 checkpoint 目录")
-                results[kernel_key][base_name] = (False, f"未找到 checkpoint")
+                print_error(f"Checkpoint directory not found for model '{base_name}'")
+                results[kernel_key][base_name] = (False, f"Checkpoint not found")
                 continue
             
-            # 获取 NK 配置
+            # Get NK config
             try:
                 nk_list, _ = get_nk_list_for_search(ckpt_name, Lmax)
-                print_info(f"NK 组合数: {len(nk_list)} (from {ckpt_name})")
+                print_info(f"NK combinations: {len(nk_list)} (from {ckpt_name})")
             except ValueError as e:
-                print_error(f"模型验证失败: {e}")
+                print_error(f"Model validation failed: {e}")
                 results[kernel_key][base_name] = (False, str(e))
                 continue
             
-            # CUDA Kernel：按 dtype 分别调优
+            # CUDA Kernel: tune separately by dtype
             if kernel_key in ["cublaslt", "cusparselt"]:
                 for dtype in dtypes:
-                    # 检查 FP8 硬件支持（CC >= 8.9）
+                    # Check FP8 hardware support (CC >= 8.9)
                     if dtype == "fp8" and not hw_info.supports_fp8:
                         print_warning(
-                            f"GPU {hw_info.gpu_name} ({hw_info.cc_tag}) 不支持原生 FP8，"
-                            f"跳过 {kernel_name} FP8 调优"
+                            f"GPU {hw_info.gpu_name} ({hw_info.cc_tag}) doesn't support native FP8, "
+                            f"skipping {kernel_name} FP8 tuning"
                         )
                         key = f"{base_name}_{dtype}"
                         results[kernel_key][key] = (
-                            True,  # 标记为成功（跳过不算失败）
-                            f"跳过: GPU 不支持 FP8 (需要 CC >= 8.9)"
+                            True,  # Mark as success (skip is not failure)
+                            f"Skipped: GPU doesn't support FP8 (requires CC >= 8.9)"
                         )
                         continue
                     
-                    # 查找该 dtype 对应的 checkpoint（用于命名输出文件）
+                    # Find checkpoint for this dtype (for naming output files)
                     dtype_ckpt = find_model_checkpoint_for_dtype(base_name, dtype)
                     if dtype_ckpt is None:
-                        print_warning(f"未找到 {base_name} 的 {dtype.upper()} checkpoint，跳过")
+                        print_warning(f"{base_name} {dtype.upper()} checkpoint not found, skipping")
                         continue
                     model_name_for_tune = dtype_ckpt.name  # 如 "Qwen2.5-0.5B-INT8"
                     
                     actual_dtype, actual_outdtype = get_dtype_for_cuda(dtype, inner_32)
                     
-                    # cuBLASLt INT8 强制 int32
+                    # cuBLASLt INT8 forced to int32
                     if kernel_key == "cublaslt" and dtype == "int8":
                         actual_outdtype = "int32"
                     
@@ -491,7 +488,7 @@ def run_autotune(
                         kernel_key,
                         actual_dtype,
                         actual_outdtype,
-                        model_name_for_tune,  # 传递完整模型名
+                        model_name_for_tune,  # Pass full model name
                         Lmax,
                         m_quick,
                         m_list,
@@ -503,17 +500,17 @@ def run_autotune(
                     results[kernel_key][key] = (success, output)
                     
                     if success:
-                        print_success(f"{kernel_name} ({dtype}) 完成")
+                        print_success(f"{kernel_name} ({dtype}) completed")
                     else:
-                        print_error(f"{kernel_name} ({dtype}) 失败:")
+                        print_error(f"{kernel_name} ({dtype}) failed:")
                         print(output[-2000:] if len(output) > 2000 else output)
             
-            # Triton Kernel：使用任意存在的 checkpoint 名
+            # Triton Kernel: use any existing checkpoint name
             else:
-                # Triton kernel 对 dtype 不敏感，使用任意找到的 checkpoint 名
+                # Triton kernel is dtype-insensitive, use any found checkpoint name
                 success, output = run_triton_tune(
                     kernel_key,
-                    ckpt_name,  # 使用找到的 checkpoint 名
+                    ckpt_name,  # Use found checkpoint name
                     Lmax,
                     m_quick,
                     m_list,
@@ -524,17 +521,17 @@ def run_autotune(
                 results[kernel_key][base_name] = (success, output)
                 
                 if success:
-                    print_success(f"{kernel_name} 完成")
+                    print_success(f"{kernel_name} completed")
                 else:
-                    print_error(f"{kernel_name} 失败:")
+                    print_error(f"{kernel_name} failed:")
                     print(output[-2000:] if len(output) > 2000 else output)
     
     return results
 
 
 def print_summary(results: dict, kernel_mask: List[bool]) -> None:
-    """打印调优总结"""
-    print_header("调优总结")
+    """Print tuning summary"""
+    print_header("Tuning Summary")
     
     kernel_keys = ["cublaslt", "cusparselt", "triton_dequant", "triton_quant_slide", "triton_quant_only"]
     
@@ -544,12 +541,12 @@ def print_summary(results: dict, kernel_mask: List[bool]) -> None:
     
     for idx, (kernel_key, kernel_name, enabled) in enumerate(zip(kernel_keys, KERNEL_NAMES, kernel_mask)):
         if not enabled:
-            print(f"  {kernel_name}: {Colors.YELLOW}[跳过]{Colors.NC}")
+            print(f"  {kernel_name}: {Colors.YELLOW}[Skipped]{Colors.NC}")
             skip_total += 1
             continue
         
         if kernel_key not in results:
-            print(f"  {kernel_name}: {Colors.RED}[未执行]{Colors.NC}")
+            print(f"  {kernel_name}: {Colors.RED}[Not Executed]{Colors.NC}")
             fail_total += 1
             continue
         
@@ -561,31 +558,31 @@ def print_summary(results: dict, kernel_mask: List[bool]) -> None:
         fail_total += fail_count
         
         if fail_count == 0:
-            status = f"{Colors.GREEN}[全部成功]{Colors.NC} ({success_count}/{len(kernel_results)})"
+            status = f"{Colors.GREEN}[All Succeeded]{Colors.NC} ({success_count}/{len(kernel_results)})"
         elif success_count == 0:
-            status = f"{Colors.RED}[全部失败]{Colors.NC} ({fail_count}/{len(kernel_results)})"
+            status = f"{Colors.RED}[All Failed]{Colors.NC} ({fail_count}/{len(kernel_results)})"
         else:
-            status = f"{Colors.YELLOW}[部分成功]{Colors.NC} ({success_count}/{len(kernel_results)})"
+            status = f"{Colors.YELLOW}[Partial Success]{Colors.NC} ({success_count}/{len(kernel_results)})"
         
         print(f"  {kernel_name}: {status}")
         
-        # 检查是否有 OOM 错误，单独列出
+        # Check for OOM errors, list separately
         oom_failures = []
         for key, (success, output) in kernel_results.items():
-            if not success and "[OOM 检测]" in output:
+            if not success and "[OOM Detected]" in output:
                 oom_failures.append(key)
         
         if oom_failures:
-            print(f"    {Colors.RED}⚠ OOM 错误:{Colors.NC} {', '.join(oom_failures)}")
+            print(f"    {Colors.RED}⚠ OOM Errors:{Colors.NC} {', '.join(oom_failures)}")
     
     print()
-    print(f"总计: 成功 {success_total}, 失败 {fail_total}, 跳过 {skip_total}")
+    print(f"Total: Success {success_total}, Failed {fail_total}, Skipped {skip_total}")
     
-    # 如果有 OOM 失败，打印统一建议
+    # If OOM failures exist, print unified suggestions
     all_oom = False
     for kernel_key in results:
         for key, (success, output) in results[kernel_key].items():
-            if not success and "[OOM 检测]" in output:
+            if not success and "[OOM Detected]" in output:
                 all_oom = True
                 break
         if all_oom:
@@ -594,83 +591,83 @@ def print_summary(results: dict, kernel_mask: List[bool]) -> None:
     if all_oom:
         print()
         print(f"{Colors.YELLOW}{'='*60}{Colors.NC}")
-        print(f"{Colors.YELLOW}提示: 检测到显存不足 (OOM) 错误{Colors.NC}")
+        print(f"{Colors.YELLOW}Note: Out of Memory (OOM) errors detected{Colors.NC}")
         print(f"{Colors.YELLOW}{'='*60}{Colors.NC}")
-        print("可尝试以下方法解决:")
-        print("  1. 减小 M 列表: --m_list 64,128,256,512,1024,2048,4096,8192,16384")
-        print("  2. 设置环境变量: export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True")
-        print("  3. 单独运行失败的模型（避免显存碎片）")
-        print("  4. 重启进程清理 GPU 显存")
+        print("Possible solutions:")
+        print("  1. Reduce M list: --m_list 64,128,256,512,1024,2048,4096,8192,16384")
+        print("  2. Set environment variable: export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True")
+        print("  3. Run failed models separately (avoid memory fragmentation)")
+        print("  4. Restart process to clear GPU memory")
         print(f"{Colors.YELLOW}{'='*60}{Colors.NC}")
 
 
 # =============================================================================
-# 主函数
+# Main Function
 # =============================================================================
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="SlideSparse 统一离线调优与算法搜索脚本",
+        description="SlideSparse unified offline tuning and algorithm search script",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     
-    # 必须参数
+    # Required args
     parser.add_argument(
         "--dtype", required=True, choices=["int8", "fp8", "all"],
-        help="输入数据类型: int8, fp8, 或 all（两者都调优）"
+        help="Input data type: int8, fp8, or all (tune both)"
     )
     
-    # CUDA 特有参数
+    # CUDA specific args
     parser.add_argument(
         "--outdtype", default="bf16", choices=["bf16", "fp32", "int32"],
-        help="输出数据类型（默认 bf16，cuBLAS+INT8 会自动 fallback 到 int32）"
+        help="Output data type (default bf16, cuBLAS+INT8 auto fallback to int32)"
     )
     parser.add_argument(
         "--inner-32", action="store_true", dest="inner_32",
-        help="使用高精度累加: FP8→FP32, INT8→INT32（仅对 CUDA Kernel 生效）"
+        help="Use high precision accumulation: FP8→FP32, INT8→INT32 (CUDA Kernel only)"
     )
     
-    # 公共参数
+    # Common args
     parser.add_argument(
         "--model", type=str, default=None,
-        help="模型 base name（如 Qwen2.5-0.5B）或带后缀名称（后缀会被忽略）。逗号分隔多个模型。"
+        help="Model base name (e.g. Qwen2.5-0.5B) or with suffix (suffix ignored). Comma-separated for multiple models."
     )
     parser.add_argument(
         "--Lmax", type=int, default=None,
-        help="最大稀疏长度 L（会生成 L=4,6,...,Lmax 的所有 NK）"
+        help="Max sparse length L (generates all NK for L=4,6,...,Lmax)"
     )
     parser.add_argument(
         "--M-quick", action="store_true", dest="m_quick",
-        help="M-quick 模式: 使用固定 M 列表 [16, 128, 1024, 4096, 16384]"
+        help="M-quick mode: use fixed M list [16, 128, 1024, 4096, 16384]"
     )
     parser.add_argument(
         "--m_list", type=str, default=None,
-        help="自定义 M 列表，逗号分隔（如 16,128,512,2048,16384）"
+        help="Custom M list, comma-separated (e.g. 16,128,512,2048,16384)"
     )
     parser.add_argument(
         "--warmup", type=int, default=DEFAULT_WARMUP,
-        help=f"预热次数（默认 {DEFAULT_WARMUP}）"
+        help=f"Warmup iterations (default {DEFAULT_WARMUP})"
     )
     parser.add_argument(
         "--repeat", type=int, default=DEFAULT_REPEAT,
-        help=f"重复次数（默认 {DEFAULT_REPEAT}）"
+        help=f"Repeat iterations (default {DEFAULT_REPEAT})"
     )
     
-    # Kernel 选择
+    # Kernel selection
     parser.add_argument(
         "--kernels", type=str, default="1,1,1,1,1",
-        help='要调优的 Kernel，格式 "1,1,0,1,1"（顺序: cuBLAS,cuSPARSE,Dequant,QuantSlide,QuantOnly）'
+        help='Kernels to tune, format "1,1,0,1,1" (order: cuBLAS,cuSPARSE,Dequant,QuantSlide,QuantOnly)'
     )
     
-    # 其他选项
+    # Other options
     parser.add_argument(
         "--skip-build", action="store_true", dest="skip_build",
-        help="跳过编译步骤（假设已编译）"
+        help="Skip build step (assume already built)"
     )
     parser.add_argument(
         "--info", action="store_true",
-        help="仅显示配置信息，不执行调优"
+        help="Show config info only, do not run tuning"
     )
     
     return parser.parse_args()
@@ -690,54 +687,54 @@ def main():
         raw_models = [m.strip() for m in args.model.split(",")]
     else:
         raw_models = DEFAULT_MODELS
-        print_warning(f"未指定模型，使用默认: {raw_models}")
+        print_warning(f"Model not specified, using default: {raw_models}")
     
-    # 标准化模型名称：提取 base name，验证存在性
+    # Normalize model names: extract base name, validate existence
     models = []
-    model_hints = {}  # 记录用户指定的量化类型（如果有）
+    model_hints = {}  # Record user-specified quant type (if any)
     for raw in raw_models:
         try:
             base, quant_hint = normalize_model_input(raw)
-            if base not in models:  # 去重
+            if base not in models:  # Deduplicate
                 models.append(base)
                 if quant_hint:
                     model_hints[base] = quant_hint
-            # 如果用户输入了带后缀的名称，提示会被忽略
+            # If user input name with suffix, notify it will be ignored
             if raw != base:
-                print_info(f"模型 '{raw}' → base name '{base}' (后缀将被忽略，按 --dtype 调优)")
+                print_info(f"Model '{raw}' → base name '{base}' (suffix ignored, tuning by --dtype)")
         except ValueError as e:
             print_error(str(e))
             return 1
     
-    # 解析 M 列表
+    # Parse M list
     m_list = None
     if args.m_list:
         m_list = [int(x.strip()) for x in args.m_list.split(",")]
     
-    # 解析 Kernel mask
+    # Parse Kernel mask
     try:
         kernel_mask = parse_kernel_mask(args.kernels)
     except ValueError as e:
         print_error(str(e))
         return 1
     
-    # 显示配置信息
-    print_header("SlideSparse 统一离线调优")
+    # Display config info
+    print_header("SlideSparse Unified Offline Tuning")
     print(f"  GPU:           {hw_info.gpu_full_name} ({hw_info.cc_tag})")
     print(f"  Python:        {hw_info.python_tag}")
     print(f"  CUDA:          {hw_info.cuda_tag}")
     print(f"  Arch:          {hw_info.arch_tag}")
     print()
-    print(f"  数据类型:      {dtypes}")
-    print(f"  输出类型:      {args.outdtype}")
-    print(f"  高精度累加:    {'是' if args.inner_32 else '否'}")
-    print(f"  模型 (base):   {models}")
-    print(f"  Lmax:          {args.Lmax or '未指定'}")
-    print(f"  M-quick:       {'是' if args.m_quick else '否'}")
-    print(f"  M 列表:        {m_list or ('M_QUICK_LIST' if args.m_quick else 'DEFAULT_M_LIST')}")
+    print(f"  Data types:    {dtypes}")
+    print(f"  Output dtype:  {args.outdtype}")
+    print(f"  High precision:{' Yes' if args.inner_32 else ' No'}")
+    print(f"  Models (base): {models}")
+    print(f"  Lmax:          {args.Lmax or 'Not specified'}")
+    print(f"  M-quick:       {' Yes' if args.m_quick else ' No'}")
+    print(f"  M list:        {m_list or ('M_QUICK_LIST' if args.m_quick else 'DEFAULT_M_LIST')}")
     print(f"  Warmup/Repeat: {args.warmup}/{args.repeat}")
     print()
-    print("  Kernel 调优:")
+    print("  Kernel tuning:")
     for name, enabled in zip(KERNEL_NAMES, kernel_mask):
         status = f"{Colors.GREEN}✓{Colors.NC}" if enabled else f"{Colors.RED}✗{Colors.NC}"
         print(f"    {status} {name}")
@@ -745,7 +742,7 @@ def main():
     if args.info:
         return 0
     
-    # 运行调优
+    # Run tuning
     results = run_autotune(
         dtypes=dtypes,
         outdtype=args.outdtype,
@@ -760,10 +757,10 @@ def main():
         skip_build=args.skip_build,
     )
     
-    # 打印总结
+    # Print summary
     print_summary(results, kernel_mask)
     
-    # 检查是否有失败
+    # Check for failures
     has_failure = any(
         not success
         for kernel_results in results.values()
