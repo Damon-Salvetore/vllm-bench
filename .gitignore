@@ -241,4 +241,5 @@ ep_kernels_workspace/
 !slidesparse/**/*.log
 
 *.triton_cache
-__pycache__/
+# Accuracy eval: ignore large model weights
+accuracy_eval/wanda/llm_weights/
