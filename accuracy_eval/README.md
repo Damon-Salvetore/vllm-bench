@@ -1,6 +1,6 @@
-# SlideSparse Accuracy Evaluation — Patched Pruning Code
+# SlideSparse Accuracy Evaluation
 
-Code backed up from `rebuttal-main` container (`bcacdwk/vllmbench:universal`) on 2026-03-28.
+Pruning and evaluation scripts for reproducing SlideSparse accuracy results. Based on [Wanda](https://github.com/locuslab/wanda) and [SparseGPT](https://github.com/IST-DASLab/sparsegpt), with modifications to support arbitrary N:M sparsity patterns and newer model architectures (e.g., Qwen2.5).
 
 ## Environment
 
@@ -11,96 +11,6 @@ Code backed up from `rebuttal-main` container (`bcacdwk/vllmbench:universal`) on
 - lm-eval 0.4.11
 - datasets 4.8.4
 - bitsandbytes 0.45.0 (for INT8 evaluation)
-
-## Wanda Patches (6 changes)
-
-### 1. Sparsity type whitelist removed (`main.py`)
-```diff
-- parser.add_argument("--sparsity_type", type=str, choices=["unstructured", "4:8", "2:4"])
-+ parser.add_argument("--sparsity_type", type=str)
-```
-Allows arbitrary N:M patterns (6:8, 8:10, etc.) instead of only 2:4 and 4:8.
-
-### 2. Assert removed + prune_n/prune_m override (`main.py`)
-```diff
-- if args.sparsity_type != "unstructured":
--     assert args.sparsity_ratio == 0.5, "sparsity ratio must be 0.5 for structured N:M sparsity"
-+ if args.sparsity_type and args.sparsity_type != "unstructured":
-      prune_n, prune_m = map(int, args.sparsity_type.split(":"))
-+     if args.prune_n > 0:
-+         prune_n = args.prune_n
-+     if args.prune_m > 0:
-+         prune_m = args.prune_m
-+     args.sparsity_ratio = prune_n / prune_m
-```
-Added `--prune_n` and `--prune_m` args for explicit override. Auto-computes sparsity_ratio.
-
-### 3. Seqlen capped to 2048 (`main.py`)
-```diff
-- model.seqlen = model.config.max_position_embeddings
-+ model.seqlen = min(model.config.max_position_embeddings, 2048)
-```
-Prevents OOM on models with large context windows (Qwen2.5 has 131072).
-
-### 4. Catcher `__getattr__` + position_embeddings (`lib/prune.py`)
-```diff
-+ def __getattr__(self, name):
-+     try:
-+         return super().__getattr__(name)
-+     except AttributeError:
-+         return getattr(self.module, name)
-```
-Fixes compatibility with newer transformers that access submodule attributes through the Catcher wrapper. Also captures `position_embeddings` kwarg needed by Qwen2.5 rotary embedding.
-
-### 5. Calibration data: c4 → wikitext2 (`lib/prune.py`)
-```diff
-- dataloader, _ = get_loaders("c4", ...)
-+ dataloader, _ = get_loaders("wikitext2", ...)
-```
-c4 dataset loading was unreliable; wikitext2 is faster and consistent with SparseGPT.
-
-### 6. Early model save (`main.py`)
-```diff
-+ if args.save_model:
-+     model.save_pretrained(args.save_model)
-+     tokenizer.save_pretrained(args.save_model)
-```
-Saves model immediately after pruning, before eval. Prevents losing pruned model if eval OOMs.
-
-## SparseGPT Patches (3 changes)
-
-### 1. Blocksize alignment for n:m pruning (`sparsegpt.py`)
-```diff
-+ if prunem > 0 and blocksize % prunem != 0:
-+     blocksize = blocksize - (blocksize % prunem)
-+     if blocksize == 0:
-+         blocksize = prunem
-```
-Fixes `RuntimeError: selected index k out of range` when blocksize (default 128) is not divisible by prunem (e.g. 6, 8, 10).
-
-### 2. Boundary-safe topk in fasterprune (`sparsegpt.py`)
-```diff
-- tmp = W1[:, i:(i + prunem)] ** 2 / ...
-- mask1.scatter_(1, i + torch.topk(tmp, prunen, ...), True)
-+ actual_m = min(prunem, count - i)
-+ actual_n = min(prunen, actual_m)
-+ if actual_n > 0:
-+     tmp = W1[:, i:(i + actual_m)] ** 2 / ...
-+     mask1.scatter_(1, i + torch.topk(tmp, actual_n, ...), True)
-```
-Clamps the group size and topk k at block boundaries to prevent index-out-of-range.
-
-### 3. Early save + PTB removal (`llama.py`)
-```diff
-+ if args.save:
-+     model.save_pretrained(args.save)
-+     tokenizer = AutoTokenizer.from_pretrained(args.model)
-+     tokenizer.save_pretrained(args.save)
-
-- for dataset in ["wikitext2", "ptb", "c4"]:
-+ for dataset in ["wikitext2"]:
-```
-Saves model before eval (same reason as Wanda). Removes PTB (deprecated in newer datasets lib).
 
 ## Usage
 
